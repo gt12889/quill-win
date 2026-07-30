@@ -1,0 +1,32 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go build -trimpath -ldflags "-s -w" -o quill.exe ./cmd/quill
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o quill-tray.exe ./cmd/quill-tray
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            quill.exe
+            quill-tray.exe
+          generate_release_notes: true
