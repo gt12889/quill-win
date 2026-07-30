@@ -11,7 +11,9 @@ from WASAPI loopback, which Windows provides natively.
 
 ## Install
 
-Build from WSL or any machine with Go 1.24+:
+Grab `quill.exe` and `quill-tray.exe` from
+[Releases](../../releases), or build them yourself from WSL or any machine
+with Go 1.24+:
 
 ```sh
 GOOS=windows GOARCH=amd64 go build -o quill.exe ./cmd/quill
@@ -21,8 +23,9 @@ GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o quill-tray.exe ./
 Then, once, on the Windows side:
 
 ```
-quill setup     # downloads whisper.cpp + the base.en model (~290MB total)
-quill doctor    # confirms devices, engine, model, folders
+quill setup      # downloads whisper.cpp + the base.en model (~290MB total)
+quill doctor     # confirms devices, mic permission, engine, model, folders
+quill install    # optional — start the tray app at login
 ```
 
 ## How to use
