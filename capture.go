@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 	"unsafe"
@@ -49,9 +50,87 @@ type trackResult struct {
 	err        error
 }
 
+// attachment is one live WASAPI capture stream on a specific device.
+type attachment struct {
+	dev        *wca.IMMDevice
+	ac         *wca.IAudioClient
+	acc        *wca.IAudioCaptureClient
+	id         string
+	name       string
+	blockAlign int
+}
+
+func (a *attachment) release() {
+	if a.ac != nil {
+		a.ac.Stop()
+	}
+	if a.acc != nil {
+		a.acc.Release()
+	}
+	if a.ac != nil {
+		a.ac.Release()
+	}
+	if a.dev != nil {
+		a.dev.Release()
+	}
+	a.acc, a.ac, a.dev = nil, nil, nil
+}
+
+// attach opens a capture stream on the current default device for the track.
+func attach(enum *wca.IMMDeviceEnumerator, kind trackKind) (*attachment, error) {
+	dataFlow := uint32(wca.ECapture)
+	if kind == trackSystem {
+		dataFlow = wca.ERender
+	}
+	a := &attachment{}
+	fail := func(stage string, err error) (*attachment, error) {
+		a.release()
+		return nil, fmt.Errorf("%s: %w", stage, err)
+	}
+
+	if err := enum.GetDefaultAudioEndpoint(dataFlow, wca.EConsole, &a.dev); err != nil {
+		return fail("default endpoint", err)
+	}
+	a.dev.GetId(&a.id)
+	a.name = deviceName(a.dev)
+
+	if err := a.dev.Activate(wca.IID_IAudioClient, wca.CLSCTX_ALL, nil, &a.ac); err != nil {
+		return fail("activate audio client", err)
+	}
+
+	wfx := wca.WAVEFORMATEX{
+		WFormatTag:      1, // PCM
+		NChannels:       captureChannels,
+		NSamplesPerSec:  captureRate,
+		NAvgBytesPerSec: captureRate * captureChannels * 2,
+		NBlockAlign:     captureChannels * 2,
+		WBitsPerSample:  16,
+	}
+	a.blockAlign = int(wfx.NBlockAlign)
+	flags := uint32(wca.AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | wca.AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)
+	if kind == trackSystem {
+		flags |= wca.AUDCLNT_STREAMFLAGS_LOOPBACK
+	}
+	// 1-second engine buffer: we poll every 10ms, so this is generous
+	// headroom against scheduling hiccups.
+	if err := a.ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, flags, wca.REFERENCE_TIME(10_000_000), 0, &wfx, nil); err != nil {
+		return fail("initialize", err)
+	}
+	if err := a.ac.GetService(wca.IID_IAudioCaptureClient, &a.acc); err != nil {
+		return fail("capture service", err)
+	}
+	if err := a.ac.Start(); err != nil {
+		return fail("start", err)
+	}
+	return a, nil
+}
+
 // captureTrack records one track until ctx is cancelled. It owns its OS
 // thread for the lifetime of the capture because COM apartments are
-// per-thread.
+// per-thread. If the device disappears mid-recording (headset unplugged) or
+// the user switches the Windows default, capture reattaches to the new
+// default and the wall-clock padding below covers the gap — a device change
+// costs a moment of silence, never the session.
 func captureTrack(ctx context.Context, kind trackKind, path string, started chan<- string, result chan<- trackResult) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -80,50 +159,13 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 	defer enum.Release()
 
-	dataFlow := uint32(wca.ECapture)
-	if kind == trackSystem {
-		dataFlow = wca.ERender
-	}
-	var dev *wca.IMMDevice
-	if err := enum.GetDefaultAudioEndpoint(dataFlow, wca.EConsole, &dev); err != nil {
-		fail("default endpoint", err)
+	att, err := attach(enum, kind)
+	if err != nil {
+		fail("attach", err)
 		return
 	}
-	defer dev.Release()
-	res.device = deviceName(dev)
-
-	var ac *wca.IAudioClient
-	if err := dev.Activate(wca.IID_IAudioClient, wca.CLSCTX_ALL, nil, &ac); err != nil {
-		fail("activate audio client", err)
-		return
-	}
-	defer ac.Release()
-
-	wfx := wca.WAVEFORMATEX{
-		WFormatTag:      1, // PCM
-		NChannels:       captureChannels,
-		NSamplesPerSec:  captureRate,
-		NAvgBytesPerSec: captureRate * captureChannels * 2,
-		NBlockAlign:     captureChannels * 2,
-		WBitsPerSample:  16,
-	}
-	flags := uint32(wca.AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | wca.AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY)
-	if kind == trackSystem {
-		flags |= wca.AUDCLNT_STREAMFLAGS_LOOPBACK
-	}
-	// 1-second engine buffer: we poll every 10ms, so this is generous
-	// headroom against scheduling hiccups.
-	if err := ac.Initialize(wca.AUDCLNT_SHAREMODE_SHARED, flags, wca.REFERENCE_TIME(10_000_000), 0, &wfx, nil); err != nil {
-		fail("initialize", err)
-		return
-	}
-
-	var acc *wca.IAudioCaptureClient
-	if err := ac.GetService(wca.IID_IAudioCaptureClient, &acc); err != nil {
-		fail("capture service", err)
-		return
-	}
-	defer acc.Release()
+	defer func() { att.release() }()
+	res.device = att.name
 
 	w, err := newFLACWriter(path, captureRate)
 	if err != nil {
@@ -132,21 +174,16 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 	defer w.close()
 
-	if err := ac.Start(); err != nil {
-		fail("start", err)
-		return
-	}
-	defer ac.Stop()
 	startedAt := time.Now()
 	res.clockStart = startedAt
 	started <- res.device
 
-	blockAlign := int(wfx.NBlockAlign)
 	lastFlush := startedAt
+	lastDeviceCheck := startedAt
 	for {
 		select {
 		case <-ctx.Done():
-			drainPackets(acc, w, blockAlign)
+			drainPackets(att, w)
 			res.frames = w.frames()
 			if err := w.flush(); err != nil && res.err == nil {
 				res.err = fmt.Errorf("%s: flush: %w", kind, err)
@@ -155,13 +192,23 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 		default:
 		}
 
-		drainPackets(acc, w, blockAlign)
+		if err := drainPackets(att, w); err != nil {
+			fmt.Fprintf(os.Stderr, "%s: device lost (%v), reattaching…\n", kind, err)
+			att = reattach(ctx, enum, kind, att)
+		} else if time.Since(lastDeviceCheck) > 2*time.Second {
+			lastDeviceCheck = time.Now()
+			if id := currentDefaultID(enum, kind); id != "" && id != att.id {
+				fmt.Fprintf(os.Stderr, "%s: default device changed, following it…\n", kind)
+				att = reattach(ctx, enum, kind, att)
+			}
+		}
 
 		// Keep the file in step with the wall clock: loopback delivers
-		// nothing while the machine plays silence, and a mic can lag or
-		// underrun. Pad with silence whenever the track falls more than
-		// 100ms behind, so both tracks stay merge-ably aligned on the
-		// clock that started at capture start.
+		// nothing while the machine plays silence, a mic can lag or
+		// underrun, and a device swap leaves a hole. Pad with silence
+		// whenever the track falls more than 100ms behind, so both
+		// tracks stay merge-ably aligned on the clock that started at
+		// capture start.
 		expected := int(time.Since(startedAt).Seconds() * captureRate)
 		if gap := expected - w.frames(); gap > captureRate/10 {
 			w.writeSilence(gap)
@@ -175,29 +222,72 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 }
 
-// drainPackets copies every packet the engine has ready into the writer.
-func drainPackets(acc *wca.IAudioCaptureClient, w *flacWriter, blockAlign int) {
+// reattach tears down a dead attachment and opens a new one on the current
+// default device, retrying until it succeeds or the recording stops. It
+// always returns a usable-or-inert attachment so the capture loop can keep
+// padding the clock while a device is missing.
+func reattach(ctx context.Context, enum *wca.IMMDeviceEnumerator, kind trackKind, old *attachment) *attachment {
+	old.release()
+	for {
+		select {
+		case <-ctx.Done():
+			return &attachment{}
+		default:
+		}
+		att, err := attach(enum, kind)
+		if err == nil {
+			fmt.Fprintf(os.Stderr, "%s: now recording from %s\n", kind, att.name)
+			return att
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func currentDefaultID(enum *wca.IMMDeviceEnumerator, kind trackKind) string {
+	dataFlow := uint32(wca.ECapture)
+	if kind == trackSystem {
+		dataFlow = wca.ERender
+	}
+	var dev *wca.IMMDevice
+	if err := enum.GetDefaultAudioEndpoint(dataFlow, wca.EConsole, &dev); err != nil {
+		return ""
+	}
+	defer dev.Release()
+	var id string
+	dev.GetId(&id)
+	return id
+}
+
+// drainPackets copies every packet the engine has ready into the writer. A
+// non-nil error means the device is gone, not that data ran out.
+func drainPackets(att *attachment, w *flacWriter) error {
+	if att.acc == nil {
+		return nil
+	}
 	for {
 		var packetFrames uint32
-		if err := acc.GetNextPacketSize(&packetFrames); err != nil || packetFrames == 0 {
-			return
+		if err := att.acc.GetNextPacketSize(&packetFrames); err != nil {
+			return err
+		}
+		if packetFrames == 0 {
+			return nil
 		}
 		var (
 			data          *byte
 			frames, flags uint32
 			devPos, qpc   uint64
 		)
-		if err := acc.GetBuffer(&data, &frames, &flags, &devPos, &qpc); err != nil {
-			return
+		if err := att.acc.GetBuffer(&data, &frames, &flags, &devPos, &qpc); err != nil {
+			return err
 		}
 		if frames > 0 {
 			if flags&wca.AUDCLNT_BUFFERFLAGS_SILENT != 0 {
 				w.writeSilence(int(frames))
 			} else {
-				w.writePCM16(unsafe.Slice(data, int(frames)*blockAlign))
+				w.writePCM16(unsafe.Slice(data, int(frames)*att.blockAlign))
 			}
 		}
-		acc.ReleaseBuffer(frames)
+		att.acc.ReleaseBuffer(frames)
 	}
 }
 
