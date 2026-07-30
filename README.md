@@ -47,6 +47,16 @@ Recording captures the **default** mic and the **default** output device
 devices mid-meeting, quill follows the new default. When you stop,
 transcription runs automatically and prints the transcript path.
 
+Something the macOS original can't do: capture **only the meeting app**, so
+notification dings and background music never land in the recording:
+
+```
+quill record --app zoom.exe      # or teams.exe, chrome.exe, a PID, ...
+```
+
+The system track then contains just that process tree's audio (Windows 10
+2004+ process loopback; the mic track is unaffected).
+
 Each session lands in `%USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\`:
 
 | File | Contents |

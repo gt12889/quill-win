@@ -27,6 +27,10 @@ type Recording struct {
 // starts both tracks. If either track fails to start, the other is torn
 // down and the folder removed — never half a session silently.
 func StartRecording() (*Recording, error) {
+	return startRecording(processTarget{})
+}
+
+func startRecording(target processTarget) (*Recording, error) {
 	root := recordingsRoot()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
@@ -50,8 +54,8 @@ func StartRecording() (*Recording, error) {
 	results := make(chan trackResult, 2)
 	micStarted := make(chan string, 1)
 	sysStarted := make(chan string, 1)
-	go captureTrack(ctx, trackSystem, filepath.Join(dir, "system.flac"), sysStarted, results)
-	go captureTrack(ctx, trackMic, filepath.Join(dir, "mic.flac"), micStarted, results)
+	go captureTrack(ctx, trackSystem, filepath.Join(dir, "system.flac"), target, sysStarted, results)
+	go captureTrack(ctx, trackMic, filepath.Join(dir, "mic.flac"), processTarget{}, micStarted, results)
 
 	sysDev, micDev := <-sysStarted, <-micStarted
 	if sysDev == "" || micDev == "" {
@@ -147,8 +151,16 @@ func writeMeta(dir string, started, ended time.Time, tracks map[trackKind]trackR
 
 // runRecord is the CLI recording flow: capture until Enter/Ctrl+C (or the
 // duration elapses), then finish the session.
-func runRecord(duration time.Duration, noTranscribe bool) error {
-	rec, err := StartRecording()
+func runRecord(duration time.Duration, noTranscribe bool, app string) error {
+	var target processTarget
+	if app != "" {
+		pid, name, err := resolveApp(app)
+		if err != nil {
+			return err
+		}
+		target = processTarget{pid: pid, name: name}
+	}
+	rec, err := startRecording(target)
 	if err != nil {
 		return err
 	}

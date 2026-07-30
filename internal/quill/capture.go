@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-ole/go-ole"
 	"github.com/moutend/go-wca/pkg/wca"
+	"golang.org/x/sys/windows"
 )
 
 // Tracks are captured at 48kHz mono — full speech quality for replay —
@@ -50,11 +51,13 @@ type trackResult struct {
 	err        error
 }
 
-// attachment is one live WASAPI capture stream on a specific device.
+// attachment is one live WASAPI capture stream, on a device or (for --app)
+// on a process tree.
 type attachment struct {
 	dev        *wca.IMMDevice
 	ac         *wca.IAudioClient
 	acc        *wca.IAudioCaptureClient
+	event      windows.Handle
 	id         string
 	name       string
 	blockAlign int
@@ -73,7 +76,17 @@ func (a *attachment) release() {
 	if a.dev != nil {
 		a.dev.Release()
 	}
-	a.acc, a.ac, a.dev = nil, nil, nil
+	if a.event != 0 {
+		windows.CloseHandle(a.event)
+	}
+	a.acc, a.ac, a.dev, a.event = nil, nil, nil, 0
+}
+
+// processTarget selects per-app capture for the system track; the zero value
+// means capture the whole default output device.
+type processTarget struct {
+	pid  uint32
+	name string
 }
 
 // attach opens a capture stream on the current default device for the track.
@@ -131,7 +144,7 @@ func attach(enum *wca.IMMDeviceEnumerator, kind trackKind) (*attachment, error) 
 // the user switches the Windows default, capture reattaches to the new
 // default and the wall-clock padding below covers the gap — a device change
 // costs a moment of silence, never the session.
-func captureTrack(ctx context.Context, kind trackKind, path string, started chan<- string, result chan<- trackResult) {
+func captureTrack(ctx context.Context, kind trackKind, path string, target processTarget, started chan<- string, result chan<- trackResult) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -159,7 +172,14 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 	defer enum.Release()
 
-	att, err := attach(enum, kind)
+	openStream := func() (*attachment, error) {
+		if kind == trackSystem && target.pid != 0 {
+			return attachProcess(target.pid, target.name)
+		}
+		return attach(enum, kind)
+	}
+
+	att, err := openStream()
 	if err != nil {
 		fail("attach", err)
 		return
@@ -194,12 +214,12 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 
 		if err := drainPackets(att, w); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: device lost (%v), reattaching…\n", kind, err)
-			att = reattach(ctx, enum, kind, att)
-		} else if time.Since(lastDeviceCheck) > 2*time.Second {
+			att = reattach(ctx, openStream, kind, att)
+		} else if target.pid == 0 && time.Since(lastDeviceCheck) > 2*time.Second {
 			lastDeviceCheck = time.Now()
 			if id := currentDefaultID(enum, kind); id != "" && id != att.id {
 				fmt.Fprintf(os.Stderr, "%s: default device changed, following it…\n", kind)
-				att = reattach(ctx, enum, kind, att)
+				att = reattach(ctx, openStream, kind, att)
 			}
 		}
 
@@ -224,11 +244,11 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 }
 
-// reattach tears down a dead attachment and opens a new one on the current
-// default device, retrying until it succeeds or the recording stops. It
-// always returns a usable-or-inert attachment so the capture loop can keep
-// padding the clock while a device is missing.
-func reattach(ctx context.Context, enum *wca.IMMDeviceEnumerator, kind trackKind, old *attachment) *attachment {
+// reattach tears down a dead attachment and opens a new one, retrying until
+// it succeeds or the recording stops. It always returns a usable-or-inert
+// attachment so the capture loop can keep padding the clock while the source
+// is missing.
+func reattach(ctx context.Context, openStream func() (*attachment, error), kind trackKind, old *attachment) *attachment {
 	old.release()
 	for {
 		select {
@@ -236,7 +256,7 @@ func reattach(ctx context.Context, enum *wca.IMMDeviceEnumerator, kind trackKind
 			return &attachment{}
 		default:
 		}
-		att, err := attach(enum, kind)
+		att, err := openStream()
 		if err == nil {
 			fmt.Fprintf(os.Stderr, "%s: now recording from %s\n", kind, att.name)
 			return att

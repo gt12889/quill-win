@@ -12,7 +12,8 @@ import (
 const usage = `quill — minimal, fully local meeting recorder + transcriber for Windows
 
 usage:
-  quill record [-d seconds] [--no-transcribe]   record mic + system audio, then transcribe
+  quill record [-d secs] [--app zoom.exe]       record mic + system audio, then transcribe
+                                                (--app: only that app's audio, no dings)
   quill transcribe [session-dir]                transcribe one session, or all pending ones
   quill devices                                 list audio devices (* = will be recorded)
   quill doctor                                  check devices, engine, model, folders
@@ -42,8 +43,9 @@ func CLIMain() {
 		fs := flag.NewFlagSet("record", flag.ExitOnError)
 		seconds := fs.Int("d", 0, "stop automatically after this many seconds")
 		noTranscribe := fs.Bool("no-transcribe", false, "skip transcription after recording")
+		app := fs.String("app", "", "record only this app's audio on the system track (image name or PID)")
 		fs.Parse(os.Args[2:])
-		err = runRecord(time.Duration(*seconds)*time.Second, *noTranscribe)
+		err = runRecord(time.Duration(*seconds)*time.Second, *noTranscribe, *app)
 	case "transcribe":
 		arg := ""
 		if len(os.Args) > 2 {
