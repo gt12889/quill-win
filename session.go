@@ -39,8 +39,8 @@ func runRecord(duration time.Duration, noTranscribe bool) error {
 	results := make(chan trackResult, 2)
 	micStarted := make(chan string, 1)
 	sysStarted := make(chan string, 1)
-	go captureTrack(ctx, trackSystem, filepath.Join(dir, "system.wav"), sysStarted, results)
-	go captureTrack(ctx, trackMic, filepath.Join(dir, "mic.wav"), micStarted, results)
+	go captureTrack(ctx, trackSystem, filepath.Join(dir, "system.flac"), sysStarted, results)
+	go captureTrack(ctx, trackMic, filepath.Join(dir, "mic.flac"), micStarted, results)
 
 	sysDev, micDev := <-sysStarted, <-micStarted
 	if sysDev == "" || micDev == "" {
@@ -141,7 +141,7 @@ func writeMeta(dir string, started, ended time.Time, tracks map[trackKind]trackR
 		"started":          started.Format(time.RFC3339),
 		"ended":            ended.Format(time.RFC3339),
 		"duration_seconds": int(ended.Sub(started).Seconds()),
-		"files":            map[string]string{"mic": "mic.wav", "system": "system.wav"},
+		"files":            map[string]string{"mic": "mic.flac", "system": "system.flac"},
 		"start_offset_ms": map[string]int{
 			"mic":    int(micStart.Sub(earliest).Milliseconds()),
 			"system": int(sysStart.Sub(earliest).Milliseconds()),

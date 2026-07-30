@@ -13,12 +13,13 @@ import (
 	"github.com/moutend/go-wca/pkg/wca"
 )
 
-// Both tracks are captured at whisper's native format so transcription needs
-// no resampling step; WASAPI's AUTOCONVERTPCM does the conversion in the
-// audio engine.
+// Tracks are captured at 48kHz mono — full speech quality for replay —
+// with WASAPI's AUTOCONVERTPCM converting from whatever the device's mix
+// format is. Transcription downsamples to whisper's 16kHz separately.
 const (
-	captureRate     = 16000
+	captureRate     = 48000
 	captureChannels = 1
+	whisperRate     = 16000
 )
 
 type trackKind int
@@ -124,9 +125,9 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 	}
 	defer acc.Release()
 
-	w, err := newWAVWriter(path, captureRate, captureChannels)
+	w, err := newFLACWriter(path, captureRate)
 	if err != nil {
-		fail("create wav", err)
+		fail("create flac", err)
 		return
 	}
 	defer w.close()
@@ -175,7 +176,7 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 }
 
 // drainPackets copies every packet the engine has ready into the writer.
-func drainPackets(acc *wca.IAudioCaptureClient, w *wavWriter, blockAlign int) {
+func drainPackets(acc *wca.IAudioCaptureClient, w *flacWriter, blockAlign int) {
 	for {
 		var packetFrames uint32
 		if err := acc.GetNextPacketSize(&packetFrames); err != nil || packetFrames == 0 {
@@ -193,7 +194,7 @@ func drainPackets(acc *wca.IAudioCaptureClient, w *wavWriter, blockAlign int) {
 			if flags&wca.AUDCLNT_BUFFERFLAGS_SILENT != 0 {
 				w.writeSilence(int(frames))
 			} else {
-				w.write(unsafe.Slice(data, int(frames)*blockAlign))
+				w.writePCM16(unsafe.Slice(data, int(frames)*blockAlign))
 			}
 		}
 		acc.ReleaseBuffer(frames)

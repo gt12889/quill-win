@@ -39,8 +39,8 @@ Each session lands in `%USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\`:
 
 | File | Contents |
 |---|---|
-| `mic.wav` | your side (default mic, 16kHz mono PCM) |
-| `system.wav` | everything the PC played — the other side of the call |
+| `mic.flac` | your side (default mic, 48kHz mono, lossless) |
+| `system.flac` | everything the PC played — the other side of the call |
 | `meta.json` | start/end timestamps, duration, per-track start offsets |
 | `transcript.json` | canonical transcript — engine + timed, speaker-tagged segments |
 | `transcript.md` | the same transcript rendered for reading |
@@ -48,9 +48,10 @@ Each session lands in `%USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\`:
 
 Two tracks on purpose, same as the original: speech models do better on clean
 single-source audio, and mic-vs-system is free two-party diarization — `me`
-vs `them` with no speaker-identification model. The WAV headers are rewritten
-every second while recording, so if the process dies mid-meeting everything
-already written is still readable.
+vs `them` with no speaker-identification model. FLAC on purpose: lossless at
+48kHz, roughly half the size of WAV for speech and near-nothing for the
+silence that dominates the system track, and every frame is independent — if
+the process dies mid-meeting, everything already flushed is still playable.
 
 ## Transcription
 
@@ -82,7 +83,7 @@ Environment variables, all optional:
 ## Differences from the macOS original
 
 - CLI instead of a menu-bar tray (a tray build is a natural next step).
-- WAV (16kHz mono PCM, whisper's native format) instead of CAF/AAC.
+- FLAC (48kHz mono, lossless) instead of CAF/AAC.
 - whisper.cpp instead of Parakeet/FluidAudio (which are Core ML, Apple-only).
 - System audio via WASAPI loopback instead of Core Audio process taps.
 

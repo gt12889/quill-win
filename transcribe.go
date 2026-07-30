@@ -92,13 +92,16 @@ func transcribeSession(dir string) error {
 	var segments []segment
 	for _, t := range []struct{ track, speaker string }{{"mic", "me"}, {"system", "them"}} {
 		track, speaker := t.track, t.speaker
-		wav := filepath.Join(dir, track+".wav")
-		if !fileExists(wav) {
-			fmt.Fprintf(logf, "%s.wav missing, skipping track\n", track)
+		wav, cleanup, err := whisperInput(dir, track, logf)
+		if err != nil {
+			return fmt.Errorf("%s: %w", track, err)
+		}
+		if wav == "" {
 			continue
 		}
 		fmt.Printf("transcribing %s (%s)…\n", filepath.Base(dir), track)
 		out, err := runWhisper(cli, model, wav, logf)
+		cleanup()
 		if err != nil {
 			return fmt.Errorf("%s: %w", track, err)
 		}
@@ -136,6 +139,26 @@ func transcribeSession(dir string) error {
 	}
 	fmt.Printf("transcript ready: %s\n", filepath.Join(dir, "transcript.md"))
 	return nil
+}
+
+// whisperInput returns a 16kHz WAV path for a track: FLAC archives are
+// transcoded to a temporary WAV (cleanup removes it), legacy 16kHz WAV
+// sessions are used as-is. An empty path means the track file is absent.
+func whisperInput(dir, track string, logf *os.File) (path string, cleanup func(), err error) {
+	cleanup = func() {}
+	if flacPath := filepath.Join(dir, track+".flac"); fileExists(flacPath) {
+		tmp := filepath.Join(dir, track+".16k.wav")
+		if err := flacTo16kWAV(flacPath, tmp); err != nil {
+			os.Remove(tmp)
+			return "", cleanup, err
+		}
+		return tmp, func() { os.Remove(tmp) }, nil
+	}
+	if wavPath := filepath.Join(dir, track+".wav"); fileExists(wavPath) {
+		return wavPath, cleanup, nil
+	}
+	fmt.Fprintf(logf, "%s track missing, skipping\n", track)
+	return "", cleanup, nil
 }
 
 // runWhisper transcribes one WAV, returning parsed segments; whisper's
