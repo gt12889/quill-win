@@ -15,6 +15,7 @@ Build from WSL or any machine with Go 1.24+:
 
 ```sh
 GOOS=windows GOARCH=amd64 go build -o quill.exe ./cmd/quill
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o quill-tray.exe ./cmd/quill-tray
 ```
 
 Then, once, on the Windows side:
@@ -26,14 +27,22 @@ quill doctor    # confirms devices, engine, model, folders
 
 ## How to use
 
+Run `quill-tray.exe` (drop a shortcut in `shell:startup` to have it always
+around): a tray icon with **Start recording** / **Stop recording**. The icon
+turns red while recording with a running elapsed counter, amber while
+transcribing. You can start the next meeting while the last one transcribes.
+
+Or from a terminal:
+
 ```
 quill record            # start; press Enter or Ctrl+C to stop
 quill record -d 3600    # or stop automatically after an hour
 ```
 
 Recording captures the **default** mic and the **default** output device
-(`quill devices` shows which, marked `*`). When you stop, transcription runs
-automatically and prints the transcript path.
+(`quill devices` shows which, marked `*`); if you unplug a headset or switch
+devices mid-meeting, quill follows the new default. When you stop,
+transcription runs automatically and prints the transcript path.
 
 Each session lands in `%USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\`:
 
@@ -92,7 +101,6 @@ model), `QUILL_LANG`.
 
 ## Differences from the macOS original
 
-- CLI instead of a menu-bar tray (a tray build is a natural next step).
 - FLAC (48kHz mono, lossless) instead of CAF/AAC.
 - whisper.cpp instead of Parakeet/FluidAudio (which are Core ML, Apple-only).
 - System audio via WASAPI loopback instead of Core Audio process taps.

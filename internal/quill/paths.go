@@ -9,6 +9,12 @@ import (
 	"path/filepath"
 )
 
+// RecordingsRoot exposes the sessions folder to other binaries (the tray's
+// "open recordings folder").
+func RecordingsRoot() string {
+	return recordingsRoot()
+}
+
 // recordingsRoot is where session folders land: %USERPROFILE%\Recordings,
 // overridable with QUILL_RECORDINGS_DIR or the config file.
 func recordingsRoot() string {
