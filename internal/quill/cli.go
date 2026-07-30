@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package quill
 
 import (
 	"flag"
@@ -29,7 +29,8 @@ Optional config at %APPDATA%\quill\config.json:
 env (win over config): QUILL_RECORDINGS_DIR, QUILL_WHISPER, QUILL_MODEL, QUILL_LANG
 `
 
-func main() {
+// CLIMain is the quill command-line entry point.
+func CLIMain() {
 	if len(os.Args) < 2 {
 		os.Stdout.WriteString(usage)
 		os.Exit(2)

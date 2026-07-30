@@ -14,7 +14,7 @@ from WASAPI loopback, which Windows provides natively.
 Build from WSL or any machine with Go 1.24+:
 
 ```sh
-GOOS=windows GOARCH=amd64 go build -o quill.exe .
+GOOS=windows GOARCH=amd64 go build -o quill.exe ./cmd/quill
 ```
 
 Then, once, on the Windows side:
