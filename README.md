@@ -27,8 +27,8 @@ quill doctor    # confirms devices, engine, model, folders
 
 ## How to use
 
-Run `quill-tray.exe` (drop a shortcut in `shell:startup` to have it always
-around): a tray icon with **Start recording** / **Stop recording**. The icon
+Run `quill-tray.exe` (`quill install` makes it start at login): a tray icon
+with **Start recording** / **Stop recording**. The icon
 turns red while recording with a running elapsed counter, amber while
 transcribing. You can start the next meeting while the last one transcribes.
 

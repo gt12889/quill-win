@@ -17,6 +17,7 @@ usage:
   quill devices                                 list audio devices (* = will be recorded)
   quill doctor                                  check devices, engine, model, folders
   quill setup [--model base.en]                 download whisper.cpp + a model (once)
+  quill install | uninstall                     start quill-tray at login (or stop doing so)
 
 Each session lands in %USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\:
 mic.flac (you) + system.flac (them), meta.json, transcript.json, transcript.md.
@@ -53,6 +54,10 @@ func CLIMain() {
 		err = runDevices()
 	case "doctor":
 		err = runDoctor()
+	case "install":
+		err = runInstall()
+	case "uninstall":
+		err = runUninstall()
 	case "setup":
 		fs := flag.NewFlagSet("setup", flag.ExitOnError)
 		model := fs.String("model", "base.en", "whisper model to download (e.g. base.en, small.en, large-v3-turbo)")
