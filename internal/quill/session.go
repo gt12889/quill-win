@@ -3,23 +3,33 @@
 package quill
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"time"
 )
 
-// runRecord captures mic + system audio into a new session folder until
-// Enter/Ctrl+C (or duration elapses), writes meta.json, then transcribes
-// unless told not to.
-func runRecord(duration time.Duration, noTranscribe bool) error {
+// Recording is a live two-track capture session. StartRecording /
+// Stop / FinishSession are the seams shared by the CLI and the tray app.
+type Recording struct {
+	Dir          string
+	StartedAt    time.Time
+	MicDevice    string
+	SystemDevice string
+
+	cancel  context.CancelFunc
+	results chan trackResult
+}
+
+// StartRecording creates a session folder under the recordings root and
+// starts both tracks. If either track fails to start, the other is torn
+// down and the folder removed — never half a session silently.
+func StartRecording() (*Recording, error) {
 	root := recordingsRoot()
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	startedAt := time.Now()
 	dir := filepath.Join(root, startedAt.Format("2006.01.02-1504"))
@@ -30,12 +40,10 @@ func runRecord(duration time.Duration, noTranscribe bool) error {
 		dir = filepath.Join(root, fmt.Sprintf("%s-%d", startedAt.Format("2006.01.02-1504"), n))
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	results := make(chan trackResult, 2)
 	micStarted := make(chan string, 1)
 	sysStarted := make(chan string, 1)
@@ -44,77 +52,52 @@ func runRecord(duration time.Duration, noTranscribe bool) error {
 
 	sysDev, micDev := <-sysStarted, <-micStarted
 	if sysDev == "" || micDev == "" {
-		// One track failed to start; never run half a session silently.
 		cancel()
 		res1, res2 := <-results, <-results
 		os.RemoveAll(dir)
 		for _, r := range []trackResult{res1, res2} {
 			if r.err != nil {
-				return r.err
+				return nil, r.err
 			}
 		}
-		return fmt.Errorf("capture failed to start")
+		return nil, fmt.Errorf("capture failed to start")
 	}
+	return &Recording{
+		Dir:          dir,
+		StartedAt:    startedAt,
+		MicDevice:    micDev,
+		SystemDevice: sysDev,
+		cancel:       cancel,
+		results:      results,
+	}, nil
+}
 
-	fmt.Printf("recording → %s\n", dir)
-	fmt.Printf("  mic:    %s\n", micDev)
-	fmt.Printf("  system: %s\n", sysDev)
+// Elapsed reports how long the session has been recording.
+func (r *Recording) Elapsed() time.Duration {
+	return time.Since(r.StartedAt)
+}
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	enter := make(chan struct{})
-	go func() {
-		// EOF (no interactive stdin) must not count as Enter, or a
-		// recording launched from a script stops instantly.
-		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err == nil {
-			close(enter)
-		}
-	}()
-
-	var timeout <-chan time.Time
-	if duration > 0 {
-		timeout = time.After(duration)
-		fmt.Printf("stopping automatically after %s\n", duration)
-	} else {
-		fmt.Println("press Enter or Ctrl+C to stop")
-	}
-
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
-loop:
-	for {
-		select {
-		case <-interrupt:
-			break loop
-		case <-enter:
-			break loop
-		case <-timeout:
-			break loop
-		case <-tick.C:
-			elapsed := time.Since(startedAt).Round(time.Second)
-			fmt.Printf("\r  %s ", elapsed)
-		}
-	}
-	fmt.Println("\nstopping…")
-	cancel()
-
+// Stop ends both tracks and writes meta.json. Track problems (a device that
+// died mid-session) are warnings on stderr, not errors — the audio that was
+// captured is still saved.
+func (r *Recording) Stop() error {
+	r.cancel()
 	byKind := map[trackKind]trackResult{}
 	for i := 0; i < 2; i++ {
-		r := <-results
-		byKind[r.kind] = r
-		if r.err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %v\n", r.err)
+		res := <-r.results
+		byKind[res.kind] = res
+		if res.err != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", res.err)
 		}
 	}
-	ended := time.Now()
+	return writeMeta(r.Dir, r.StartedAt, time.Now(), byKind)
+}
 
-	if err := writeMeta(dir, startedAt, ended, byKind); err != nil {
-		return err
-	}
-	fmt.Printf("saved %s (%ds)\n", dir, int(ended.Sub(startedAt).Seconds()))
-
+// FinishSession is the post-recording tail shared by every UI: transcribe
+// when wanted and possible, then fire the on_stop hook either way.
+func FinishSession(dir string, transcribe bool) error {
 	defer runOnStopHook(dir)
-	if noTranscribe || !transcriptionEnabled() {
+	if !transcribe || !transcriptionEnabled() {
 		return nil
 	}
 	if findWhisperCLI() == "" || findModel() == "" {
@@ -157,4 +140,25 @@ func writeMeta(dir string, started, ended time.Time, tracks map[trackKind]trackR
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, "meta.json"), data, 0o644)
+}
+
+// runRecord is the CLI recording flow: capture until Enter/Ctrl+C (or the
+// duration elapses), then finish the session.
+func runRecord(duration time.Duration, noTranscribe bool) error {
+	rec, err := StartRecording()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("recording → %s\n", rec.Dir)
+	fmt.Printf("  mic:    %s\n", rec.MicDevice)
+	fmt.Printf("  system: %s\n", rec.SystemDevice)
+
+	waitForStop(duration)
+	fmt.Println("\nstopping…")
+	if err := rec.Stop(); err != nil {
+		return err
+	}
+	fmt.Printf("saved %s (%ds)\n", rec.Dir, int(rec.Elapsed().Seconds()))
+	return FinishSession(rec.Dir, !noTranscribe)
 }
