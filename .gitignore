@@ -2,4 +2,6 @@ quill.exe
 quill-tray.exe
 quill-test.exe
 quill-tray-test.exe
+quill-tests.exe
+quill-soak.exe
 *.wav

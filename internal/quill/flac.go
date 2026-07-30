@@ -138,11 +138,18 @@ func (w *flacWriter) close() error {
 // mono WAV whisper wants, averaging each group of three samples as a cheap
 // anti-alias filter (48000/16000 = 3).
 func flacTo16kWAV(src, dst string) error {
-	stream, err := flac.Open(src)
+	// Not flac.Open: it loses the *os.File behind a bufio.Reader and its
+	// Stream.Close never closes the file — which on Windows would leave
+	// the session locked for the life of a long-running tray process.
+	f, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer stream.Close()
+	defer f.Close()
+	stream, err := flac.New(f)
+	if err != nil {
+		return err
+	}
 	if stream.Info.SampleRate != captureRate || stream.Info.NChannels != 1 {
 		return fmt.Errorf("unexpected FLAC format: %d Hz, %d ch", stream.Info.SampleRate, stream.Info.NChannels)
 	}
