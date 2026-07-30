@@ -31,16 +31,19 @@ func StartRecording() (*Recording, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
+	// os.Mkdir (not MkdirAll) atomically claims the folder name, so two
+	// recordings started in the same minute can never share a session.
 	startedAt := time.Now()
 	dir := filepath.Join(root, startedAt.Format("2006.01.02-1504"))
 	for n := 2; ; n++ {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.Mkdir(dir, 0o755)
+		if err == nil {
 			break
 		}
+		if !os.IsExist(err) {
+			return nil, err
+		}
 		dir = filepath.Join(root, fmt.Sprintf("%s-%d", startedAt.Format("2006.01.02-1504"), n))
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
