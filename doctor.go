@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-ole/go-ole"
 	"github.com/moutend/go-wca/pkg/wca"
+	"golang.org/x/sys/windows/registry"
 )
 
 // runDevices lists active audio endpoints, marking the defaults quill will
@@ -79,6 +80,9 @@ func runDoctor() error {
 	check(micName != "", "default mic", micName)
 	check(sysName != "", "default output", sysName)
 
+	allowed, detail := micConsentAllowed()
+	check(allowed, "mic privacy", detail)
+
 	cli := findWhisperCLI()
 	check(cli != "", "whisper-cli", orHint(cli, "run `quill setup`"))
 	model := findModel()
@@ -97,6 +101,26 @@ func runDoctor() error {
 		return fmt.Errorf("some checks failed")
 	}
 	return nil
+}
+
+// micConsentAllowed reads Windows' microphone privacy consent for desktop
+// apps. WASAPI just delivers silence when access is denied, so without this
+// check a denied mic looks like a broken one.
+func micConsentAllowed() (bool, string) {
+	const base = `Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone`
+	for _, sub := range []string{base, base + `\NonPackaged`} {
+		k, err := registry.OpenKey(registry.CURRENT_USER, sub, registry.QUERY_VALUE)
+		if err != nil {
+			// Missing keys (older Windows) mean no consent gate.
+			continue
+		}
+		value, _, err := k.GetStringValue("Value")
+		k.Close()
+		if err == nil && value == "Deny" {
+			return false, "— denied in Settings > Privacy & security > Microphone"
+		}
+	}
+	return true, "microphone access allowed for desktop apps"
 }
 
 func orHint(value, hint string) string {
