@@ -39,9 +39,28 @@ func runTranscribe(arg string) error {
 	if arg != "" {
 		return transcribeSession(arg)
 	}
+	pending := PendingSessions()
+	if len(pending) == 0 {
+		fmt.Println("nothing to transcribe")
+		return nil
+	}
+	fmt.Printf("%d pending session(s)\n", len(pending))
+	for _, dir := range pending {
+		if err := transcribeSession(dir); err != nil {
+			// Failures log and never block later jobs.
+			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
+		}
+	}
+	return nil
+}
+
+// PendingSessions lists finished-but-untranscribed session dirs, oldest
+// first — the filesystem is the queue, so a crash or quit mid-transcription
+// is picked up by the next `quill transcribe` or tray launch.
+func PendingSessions() []string {
 	entries, err := os.ReadDir(recordingsRoot())
 	if err != nil {
-		return err
+		return nil
 	}
 	var pending []string
 	for _, e := range entries {
@@ -53,19 +72,8 @@ func runTranscribe(arg string) error {
 			pending = append(pending, dir)
 		}
 	}
-	if len(pending) == 0 {
-		fmt.Println("nothing to transcribe")
-		return nil
-	}
 	sort.Strings(pending)
-	fmt.Printf("%d pending session(s)\n", len(pending))
-	for _, dir := range pending {
-		if err := transcribeSession(dir); err != nil {
-			// Failures log and never block later jobs.
-			fmt.Fprintf(os.Stderr, "%s: %v\n", dir, err)
-		}
-	}
-	return nil
+	return pending
 }
 
 func transcribeSession(dir string) error {

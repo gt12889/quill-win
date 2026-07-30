@@ -26,6 +26,9 @@ type flacWriter struct {
 	pending  []int32
 	frameNum uint64
 	total    int
+	// err is sticky: the capture loop can't stop for a failing disk, so
+	// the first write error is kept and surfaced by flush/close.
+	err error
 }
 
 func newFLACWriter(path string, sampleRate int) (*flacWriter, error) {
@@ -66,6 +69,9 @@ func (w *flacWriter) writeSilence(frames int) error {
 func (w *flacWriter) drain() error {
 	for len(w.pending) >= flacBlockSize {
 		if err := w.encodeBlock(w.pending[:flacBlockSize]); err != nil {
+			if w.err == nil {
+				w.err = err
+			}
 			return err
 		}
 		w.pending = w.pending[flacBlockSize:]
@@ -105,12 +111,19 @@ func (w *flacWriter) frames() int {
 }
 
 func (w *flacWriter) flush() error {
+	if w.err != nil {
+		return w.err
+	}
 	return w.f.Sync()
 }
 
 // close pads the final partial block with silence so every frame in the
 // stream has the fixed block size, then finalizes StreamInfo.
 func (w *flacWriter) close() error {
+	if w.err != nil {
+		w.enc.Close()
+		return w.err
+	}
 	if n := len(w.pending); n > 0 {
 		w.pending = append(w.pending, make([]int32, flacBlockSize-n)...)
 		if err := w.drain(); err != nil {

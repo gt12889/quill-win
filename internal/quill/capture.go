@@ -215,7 +215,9 @@ func captureTrack(ctx context.Context, kind trackKind, path string, started chan
 		}
 
 		if time.Since(lastFlush) > time.Second {
-			w.flush()
+			if err := w.flush(); err != nil && res.err == nil {
+				res.err = fmt.Errorf("%s: %w", kind, err)
+			}
 			lastFlush = time.Now()
 		}
 		time.Sleep(10 * time.Millisecond)

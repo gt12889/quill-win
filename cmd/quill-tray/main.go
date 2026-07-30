@@ -61,6 +61,19 @@ func onReady() {
 			}
 		}
 
+		// Sessions interrupted mid-transcription (a crash, a quit while
+		// busy) resume on launch, as in the original.
+		if pending := quill.PendingSessions(); len(pending) > 0 {
+			transcribing++
+			setIdleOrBusy()
+			go func() {
+				for _, dir := range pending {
+					quill.FinishSession(dir, true)
+				}
+				finished <- struct{}{}
+			}()
+		}
+
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 		for {
