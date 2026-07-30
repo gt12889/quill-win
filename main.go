@@ -16,13 +16,17 @@ usage:
   quill transcribe [session-dir]                transcribe one session, or all pending ones
   quill devices                                 list audio devices (* = will be recorded)
   quill doctor                                  check devices, engine, model, folders
-  quill setup                                   download whisper.cpp + model (~150MB, once)
+  quill setup [--model base.en]                 download whisper.cpp + a model (once)
 
 Each session lands in %USERPROFILE%\Recordings\<yyyy.MM.dd-HHmm>\:
-mic.wav (you) + system.wav (them), meta.json, transcript.json, transcript.md.
+mic.flac (you) + system.flac (them), meta.json, transcript.json, transcript.md.
 Nothing ever leaves the machine.
 
-env: QUILL_RECORDINGS_DIR, QUILL_WHISPER, QUILL_MODEL
+Optional config at %APPDATA%\quill\config.json:
+  {"recordings_dir": "...", "on_stop": "my-hook.cmd",
+   "transcription": {"enabled": true, "model": "small.en", "language": "auto"}}
+
+env (win over config): QUILL_RECORDINGS_DIR, QUILL_WHISPER, QUILL_MODEL, QUILL_LANG
 `
 
 func main() {
@@ -49,7 +53,10 @@ func main() {
 	case "doctor":
 		err = runDoctor()
 	case "setup":
-		err = runSetup()
+		fs := flag.NewFlagSet("setup", flag.ExitOnError)
+		model := fs.String("model", "base.en", "whisper model to download (e.g. base.en, small.en, large-v3-turbo)")
+		fs.Parse(os.Args[2:])
+		err = runSetup(*model)
 	case "help", "-h", "--help":
 		os.Stdout.WriteString(usage)
 	default:

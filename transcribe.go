@@ -165,7 +165,11 @@ func whisperInput(dir, track string, logf *os.File) (path string, cleanup func()
 // stderr goes to the session's transcribe.log.
 func runWhisper(cli, model, wav string, logf *os.File) (*whisperOutput, error) {
 	outPrefix := strings.TrimSuffix(wav, ".wav")
-	cmd := exec.Command(cli, "-m", model, "-f", wav, "-oj", "-of", outPrefix, "-np")
+	args := []string{"-m", model, "-f", wav, "-oj", "-of", outPrefix, "-np"}
+	if lang := transcriptionLanguage(); lang != "" {
+		args = append(args, "-l", lang)
+	}
+	cmd := exec.Command(cli, args...)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	if err := cmd.Run(); err != nil {

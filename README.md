@@ -66,19 +66,29 @@ on all of them — so it's fine to record with transcription unavailable, or to
 re-run after a crash. Failures append to the session's `transcribe.log` and
 never block later jobs.
 
-Want a better model? Drop any `ggml-*.bin` into `%LOCALAPPDATA%\quill\models`
-or point `QUILL_MODEL` at one (e.g. `ggml-small.en.bin` for more accuracy,
-still fast on CPU).
+Want a better model? `quill setup --model small.en` (or `large-v3-turbo`,
+or a multilingual one like `small`), then select it in the config below.
+Non-English meetings: use a multilingual model and set `language` to your
+language code, or `"auto"`.
 
 ## Config
 
-Environment variables, all optional:
+Optional, at `%APPDATA%\quill\config.json` — same shape as the original:
 
-| Var | Meaning | Default |
-|---|---|---|
-| `QUILL_RECORDINGS_DIR` | where sessions are written | `%USERPROFILE%\Recordings` |
-| `QUILL_WHISPER` | path to `whisper-cli.exe` | auto-detected from `%LOCALAPPDATA%\quill\bin`, then `PATH` |
-| `QUILL_MODEL` | path to a ggml model | newest `ggml-*.bin` in `%LOCALAPPDATA%\quill\models` |
+```json
+{
+  "recordings_dir": "D:\\Recordings",
+  "transcription": { "enabled": true, "model": "small.en", "language": "auto" },
+  "on_stop": "my-hook.cmd"
+}
+```
+
+`on_stop` runs after each session finishes (transcribed or not) with the
+session folder as its argument — handy for syncing or indexing.
+
+Environment variables win over the file: `QUILL_RECORDINGS_DIR`,
+`QUILL_WHISPER` (path to `whisper-cli.exe`), `QUILL_MODEL` (path to a ggml
+model), `QUILL_LANG`.
 
 ## Differences from the macOS original
 

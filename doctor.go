@@ -87,6 +87,12 @@ func runDoctor() error {
 	err := os.MkdirAll(recordingsRoot(), 0o755)
 	check(err == nil, "recordings dir", recordingsRoot())
 
+	if fileExists(configPath()) {
+		fmt.Printf("ok       config %s\n", configPath())
+	} else {
+		fmt.Printf("ok       config none (defaults; %s)\n", configPath())
+	}
+
 	if !ok {
 		return fmt.Errorf("some checks failed")
 	}

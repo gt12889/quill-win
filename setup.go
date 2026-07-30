@@ -9,19 +9,25 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
-const (
-	whisperZipURL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip"
-	// base.en: good accuracy for meeting audio at ~140MB and fast on CPU.
-	// Drop a different ggml-*.bin into models\ (or set QUILL_MODEL) to
-	// switch.
-	modelURL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
-)
+const whisperZipURL = "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip"
+
+// knownModels maps --model names to rough download sizes, for the error
+// message; any name whisper.cpp publishes works.
+var knownModels = map[string]string{
+	"tiny.en": "78MB", "tiny": "78MB",
+	"base.en": "148MB", "base": "148MB",
+	"small.en": "488MB", "small": "488MB",
+	"medium.en": "1.5GB", "medium": "1.5GB",
+	"large-v3-turbo": "1.6GB",
+}
 
 // runSetup downloads the whisper.cpp Windows build and a model into
-// %LOCALAPPDATA%\quill. Both steps are idempotent.
-func runSetup() error {
+// %LOCALAPPDATA%\quill. Both steps are idempotent per model.
+func runSetup(model string) error {
 	binDir := filepath.Join(appDir(), "bin")
 	modelDir := filepath.Join(appDir(), "models")
 	for _, d := range []string{binDir, modelDir} {
@@ -47,14 +53,27 @@ func runSetup() error {
 		fmt.Println("whisper-cli installed")
 	}
 
-	if findModel() != "" {
-		fmt.Printf("model already installed: %s\n", filepath.Base(findModel()))
+	if _, known := knownModels[model]; !known {
+		names := make([]string, 0, len(knownModels))
+		for name := range knownModels {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Printf("note: %q is not a model this tool knows (%s) — trying anyway\n",
+			model, strings.Join(names, ", "))
+	}
+	dest := filepath.Join(modelDir, "ggml-"+model+".bin")
+	if fileExists(dest) {
+		fmt.Printf("model already installed: %s\n", filepath.Base(dest))
 	} else {
-		dest := filepath.Join(modelDir, "ggml-base.en.bin")
-		if err := download(modelURL, dest); err != nil {
+		url := "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-" + model + ".bin"
+		if size := knownModels[model]; size != "" {
+			fmt.Printf("model %s is about %s\n", model, size)
+		}
+		if err := download(url, dest); err != nil {
 			return fmt.Errorf("download model: %w", err)
 		}
-		fmt.Println("model installed: ggml-base.en.bin")
+		fmt.Printf("model installed: %s\n", filepath.Base(dest))
 	}
 
 	fmt.Println("setup complete — `quill record` will now transcribe automatically")

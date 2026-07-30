@@ -113,7 +113,8 @@ loop:
 	}
 	fmt.Printf("saved %s (%ds)\n", dir, int(ended.Sub(startedAt).Seconds()))
 
-	if noTranscribe {
+	defer runOnStopHook(dir)
+	if noTranscribe || !transcriptionEnabled() {
 		return nil
 	}
 	if findWhisperCLI() == "" || findModel() == "" {

@@ -10,10 +10,13 @@ import (
 )
 
 // recordingsRoot is where session folders land: %USERPROFILE%\Recordings,
-// overridable with QUILL_RECORDINGS_DIR.
+// overridable with QUILL_RECORDINGS_DIR or the config file.
 func recordingsRoot() string {
 	if dir := os.Getenv("QUILL_RECORDINGS_DIR"); dir != "" {
 		return dir
+	}
+	if config.RecordingsDir != "" {
+		return config.RecordingsDir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -58,12 +61,20 @@ func findWhisperCLI() string {
 	return ""
 }
 
-// findModel locates the ggml model: QUILL_MODEL first, then the newest
-// ggml-*.bin under appDir()\models.
+// findModel locates the ggml model: QUILL_MODEL first, then the config
+// file's transcription.model (a path, or a name like "small.en" resolved in
+// the models dir), then any ggml-*.bin under appDir()\models.
 func findModel() string {
 	if p := os.Getenv("QUILL_MODEL"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p
+		}
+	}
+	if m := config.Transcription.Model; m != "" {
+		for _, candidate := range []string{m, filepath.Join(appDir(), "models", "ggml-"+m+".bin")} {
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
 		}
 	}
 	matches, _ := filepath.Glob(filepath.Join(appDir(), "models", "ggml-*.bin"))
