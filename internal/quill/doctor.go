@@ -5,6 +5,7 @@ package quill
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 
 	"github.com/go-ole/go-ole"
@@ -90,6 +91,20 @@ func runDoctor() error {
 
 	err := os.MkdirAll(recordingsRoot(), 0o755)
 	check(err == nil, "recordings dir", recordingsRoot())
+
+	if dir := syncDir(); dir != "" {
+		if _, statErr := os.Stat(dir); statErr != nil {
+			check(false, "sync dir", dir+" — does not exist")
+		} else if _, lookErr := exec.LookPath("git"); lookErr != nil {
+			check(false, "sync git", "— git not on PATH")
+		} else if wtErr := gitIn(dir, "rev-parse", "--is-inside-work-tree"); wtErr != nil {
+			check(false, "sync dir", dir+" — not a git work tree")
+		} else if remoteErr := gitIn(dir, "ls-remote", "--exit-code", "origin", "HEAD"); remoteErr != nil {
+			check(false, "sync remote", "— origin missing or unreachable")
+		} else {
+			check(true, "sync", dir)
+		}
+	}
 
 	if fileExists(configPath()) {
 		fmt.Printf("ok       config %s\n", configPath())
