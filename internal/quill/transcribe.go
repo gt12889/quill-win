@@ -145,6 +145,7 @@ func transcribeSession(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "transcript.md"), []byte(renderMarkdown(filepath.Base(dir), segments)), 0o644); err != nil {
 		return err
 	}
+	syncSession(dir, segments, logf)
 	fmt.Printf("transcript ready: %s\n", filepath.Join(dir, "transcript.md"))
 	return nil
 }
