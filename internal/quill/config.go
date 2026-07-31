@@ -19,6 +19,10 @@ type configFile struct {
 		Language string `json:"language"`
 		Model    string `json:"model"`
 	} `json:"transcription"`
+	Sync struct {
+		Dir  string `json:"dir"`
+		Push *bool  `json:"push"`
+	} `json:"sync"`
 	OnStop string `json:"on_stop"`
 }
 
@@ -75,4 +79,17 @@ func runOnStopHook(sessionDir string) {
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "on_stop hook: %v\n", err)
 	}
+}
+
+// syncDir returns the transcript-sync destination; empty means sync is off.
+func syncDir() string {
+	return config.Sync.Dir
+}
+
+// syncPush reports whether sync should git-push (default true).
+func syncPush() bool {
+	if p := config.Sync.Push; p != nil {
+		return *p
+	}
+	return true
 }
