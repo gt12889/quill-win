@@ -39,3 +39,33 @@ func TestRenderNote(t *testing.T) {
 		t.Errorf("note must start with frontmatter, got:\n%s", note[:40])
 	}
 }
+
+func TestRenderNoteRoundingUp(t *testing.T) {
+	// 45 seconds should round to 1 minute (nearest-minute rounding)
+	started := time.Date(2026, 7, 30, 14, 35, 2, 0, time.FixedZone("CDT", -5*3600))
+	note := renderNote("2026.07.30-test", noteMeta{
+		Started:         started,
+		DurationSeconds: 45,
+		MicDevice:       "Microphone",
+		SystemDevice:    "Speakers",
+	}, []segment{})
+
+	if !strings.Contains(note, "duration_minutes: 1\n") {
+		t.Errorf("45 seconds should round to 1 minute, got:\n%s", note)
+	}
+}
+
+func TestRenderNoteRoundingDown(t *testing.T) {
+	// 20 seconds should round to 0 minutes (nearest-minute rounding)
+	started := time.Date(2026, 7, 30, 14, 35, 2, 0, time.FixedZone("CDT", -5*3600))
+	note := renderNote("2026.07.30-test", noteMeta{
+		Started:         started,
+		DurationSeconds: 20,
+		MicDevice:       "Microphone",
+		SystemDevice:    "Speakers",
+	}, []segment{})
+
+	if !strings.Contains(note, "duration_minutes: 0\n") {
+		t.Errorf("20 seconds should round to 0 minutes, got:\n%s", note)
+	}
+}
