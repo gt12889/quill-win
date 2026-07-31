@@ -101,12 +101,18 @@ Optional, at `%APPDATA%\quill\config.json` — same shape as the original:
 {
   "recordings_dir": "D:\\Recordings",
   "transcription": { "enabled": true, "model": "small.en", "language": "auto" },
+  "sync": { "dir": "C:\\Users\\me\\meeting-notes", "push": true },
   "on_stop": "my-hook.cmd"
 }
 ```
 
 `on_stop` runs after each session finishes (transcribed or not) with the
 session folder as its argument — handy for syncing or indexing.
+
+`sync` files each finished transcript into that folder as an
+Obsidian-compatible note (`<session>.md`, YAML frontmatter + transcript) and,
+if the folder is a git repo, commits and pushes it. Failures never block the
+recording; `quill doctor` checks the destination.
 
 Environment variables win over the file: `QUILL_RECORDINGS_DIR`,
 `QUILL_WHISPER` (path to `whisper-cli.exe`), `QUILL_MODEL` (path to a ggml
