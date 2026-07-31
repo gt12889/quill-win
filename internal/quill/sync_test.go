@@ -24,8 +24,8 @@ func TestRenderNote(t *testing.T) {
 		"---\ndate: 2026-07-30\n",
 		"started: 2026-07-30T14:35:02-05:00\n",
 		"duration_minutes: 2\n",
-		"mic: Microphone (fifine Microphone)\n",
-		"system: Speakers (HT-NT5 B81D342)\n",
+		"mic: \"Microphone (fifine Microphone)\"\n",
+		"system: \"Speakers (HT-NT5 B81D342)\"\n",
 		"source: quill\n---\n",
 		"# 2026.07.30-1435\n",
 		"**me** — 00:00:00\nHi.\n",
@@ -52,6 +52,23 @@ func TestRenderNoteRoundingUp(t *testing.T) {
 
 	if !strings.Contains(note, "duration_minutes: 1\n") {
 		t.Errorf("45 seconds should round to 1 minute, got:\n%s", note)
+	}
+}
+
+func TestRenderNoteQuotesDevices(t *testing.T) {
+	// A device name containing ": " would otherwise be parsed as a nested
+	// YAML mapping key rather than the frontmatter value; quoting it keeps
+	// the frontmatter valid.
+	started := time.Date(2026, 7, 30, 14, 35, 2, 0, time.FixedZone("CDT", -5*3600))
+	note := renderNote("2026.07.30-test", noteMeta{
+		Started:         started,
+		DurationSeconds: 60,
+		MicDevice:       "Mic: Array (Intel)",
+		SystemDevice:    "Speakers",
+	}, []segment{})
+
+	if !strings.Contains(note, `mic: "Mic: Array (Intel)"`+"\n") {
+		t.Errorf("device name with %q should render as a quoted scalar, got:\n%s", ": ", note)
 	}
 }
 

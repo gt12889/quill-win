@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,12 +33,18 @@ func renderNote(sessionName string, meta noteMeta, segments []segment) string {
 	fmt.Fprintf(&b, "date: %s\n", meta.Started.Format("2006-01-02"))
 	fmt.Fprintf(&b, "started: %s\n", meta.Started.Format(time.RFC3339))
 	fmt.Fprintf(&b, "duration_minutes: %d\n", (meta.DurationSeconds+30)/60)
-	fmt.Fprintf(&b, "mic: %s\n", meta.MicDevice)
-	fmt.Fprintf(&b, "system: %s\n", meta.SystemDevice)
+	fmt.Fprintf(&b, "mic: %q\n", meta.MicDevice)
+	fmt.Fprintf(&b, "system: %q\n", meta.SystemDevice)
 	b.WriteString("source: quill\n---\n\n")
 	b.WriteString(renderMarkdown(sessionName, segments))
 	return b.String()
 }
+
+// syncMu serializes git operations against the notes repo. The tray can
+// transcribe multiple sessions concurrently, and concurrent git commands in
+// the same work tree race on the repo's index.lock; the loser would leave
+// its note written but never committed.
+var syncMu sync.Mutex
 
 // syncSession renders the session's note into the configured sync dir and
 // commits/pushes it. Sync is best-effort by design: any failure is reported
@@ -67,6 +74,9 @@ func syncSession(sessionDir string, segments []segment, logf *os.File) {
 		return
 	}
 
+	syncMu.Lock()
+	defer syncMu.Unlock()
+
 	if err := gitIn(dir, "rev-parse", "--is-inside-work-tree"); err != nil {
 		report(fmt.Errorf("%s is not a git work tree; note written but not committed", dir))
 		return
@@ -75,12 +85,15 @@ func syncSession(sessionDir string, segments []segment, logf *os.File) {
 		report(err)
 		return
 	}
-	// A re-sync of an unchanged note has nothing staged; that's success,
-	// not an error, so check before committing.
-	if err := gitIn(dir, "diff", "--cached", "--quiet"); err == nil {
+	// A re-sync of an unchanged note has nothing staged for this file;
+	// that's success, not an error, so check before committing. Scoping
+	// to the note file (rather than the whole index) keeps this from
+	// tripping on — or committing — the user's own unrelated staged
+	// changes in their notes repo (e.g. obsidian-git auto-staging).
+	if err := gitIn(dir, "diff", "--cached", "--quiet", "--", name+".md"); err == nil {
 		return
 	}
-	if err := gitIn(dir, "commit", "-m", "meeting: "+name); err != nil {
+	if err := gitIn(dir, "commit", "-m", "meeting: "+name, "--", name+".md"); err != nil {
 		report(err)
 		return
 	}
